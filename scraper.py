@@ -34,12 +34,36 @@ def get_soup(url: str) -> BeautifulSoup:
 def normalize_text(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
+def extract_article_date_from_link(link: str) -> str:
+    m = re.search(r"n(\d{4})(\d{2})(\d{2})", link)
+    if m:
+        return f"{m.group(1)}/{m.group(2)}/{m.group(3)}"
+    return ""
+
+def get_stock_name(code: str) -> str:
+    url = f"https://kabutan.jp/stock/?code={code}"
+    soup = get_soup(url)
+
+    title = soup.title.get_text(strip=True) if soup.title else ""
+    # 例: ブレインズテクノロジー【4075】｜ニュース｜株探（かぶたん）
+    m = re.match(r"(.+?)【" + re.escape(code) + r"】", title)
+    if m:
+        return m.group(1).strip()
+
+    # 保険
+    h2 = soup.select_one("h2")
+    if h2:
+        txt = normalize_text(h2.get_text())
+        if txt and txt != code:
+            return txt
+
+    return code
+
 def extract_ranked_stocks(url: str, limit: int = 20) -> list[dict]:
     soup = get_soup(url)
     stocks = []
     seen = set()
 
-    # ランキングページ内の個別銘柄リンクを順番に拾う
     for a in soup.select("a[href*='/stock/?code=']"):
         href = a.get("href", "")
         m = re.search(r"code=([0-9A-Z]+)", href)
@@ -54,13 +78,8 @@ def extract_ranked_stocks(url: str, limit: int = 20) -> list[dict]:
         if code in seen:
             continue
 
-        name = normalize_text(a.get_text())
-        if not name:
-            continue
-
         stocks.append({
-            "code": code,
-            "name": name
+            "code": code
         })
         seen.add(code)
 
@@ -69,19 +88,6 @@ def extract_ranked_stocks(url: str, limit: int = 20) -> list[dict]:
 
     return stocks
 
-def extract_article_date(text: str) -> str:
-    text = normalize_text(text)
-
-    m = re.search(r"(\d{2}/\d{2}\s+\d{2}:\d{2})", text)
-    if m:
-        return m.group(1)
-
-    m = re.search(r"(\d{4}/\d{2}/\d{2}\s+\d{2}:\d{2})", text)
-    if m:
-        return m.group(1)
-
-    return ""
-
 def pick_materials(code: str, max_items: int = 3) -> list[dict]:
     url = f"https://kabutan.jp/stock/news?code={code}"
     soup = get_soup(url)
@@ -89,7 +95,6 @@ def pick_materials(code: str, max_items: int = 3) -> list[dict]:
     materials = []
     seen_titles = set()
 
-    # まずニュースリンクを直接拾う
     for a in soup.select("a[href*='&b=n']"):
         title = normalize_text(a.get_text())
         if not title:
@@ -100,15 +105,7 @@ def pick_materials(code: str, max_items: int = 3) -> list[dict]:
             continue
 
         link = urljoin("https://kabutan.jp", a.get("href", ""))
-
-        # 親要素の文字列から日付を拾う
-        parent_text = ""
-        if a.parent:
-            parent_text = normalize_text(a.parent.get_text(" "))
-        if not parent_text and a.parent and a.parent.parent:
-            parent_text = normalize_text(a.parent.parent.get_text(" "))
-
-        article_date = extract_article_date(parent_text)
+        article_date = extract_article_date_from_link(link)
 
         materials.append({
             "title": title,
@@ -122,15 +119,14 @@ def pick_materials(code: str, max_items: int = 3) -> list[dict]:
 
     return materials
 
-def build_rows(category: str, ranking_url: str, limit: int = 20) -> list[dict]:
+def build_rows(category: str, ranking_url: str, limit: int = 10) -> list[dict]:
     ranked = extract_ranked_stocks(ranking_url, limit=limit)
     rows = []
     now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
 
     for idx, stock in enumerate(ranked, start=1):
         code = stock["code"]
-        name = stock["name"]
-        news_list_url = f"https://kabutan.jp/stock/news?code={code}"
+        name = get_stock_name(code)
         materials = pick_materials(code, max_items=3)
 
         rows.append({
@@ -138,20 +134,15 @@ def build_rows(category: str, ranking_url: str, limit: int = 20) -> list[dict]:
             "rank": idx,
             "code": code,
             "name": name,
-            "news_list_url": news_list_url,
+            "news_list_url": f"https://kabutan.jp/stock/news?code={code}",
             "materials": materials,
             "time": now_str
         })
 
     return rows
 
-def main():
-    rows = []
-    rows += build_rows("PTS", PTS_URL, limit=20)
-    rows += build_rows("S高", STOP_URL, limit=20)
+rows = []
+rows += build_rows("PTS", PTS_URL, limit=10)
+rows += build_rows("S高", STOP_URL, limit=10)
 
-    with open("docs/material.json", "w", encoding="utf-8") as f:
-        json.dump(rows, f, ensure_ascii=False, indent=2)
-
-if __name__ == "__main__":
-    main()
+print(json.dumps(rows[:3], ensure_ascii=False, indent=2))
