@@ -27,164 +27,117 @@ ng_words = [
 ]
 
 def get_soup(url):
-    r = requests.get(url,headers=headers,timeout=20)
+    r = requests.get(url, headers=headers, timeout=20)
     r.raise_for_status()
-    return BeautifulSoup(r.text,"lxml")
+    return BeautifulSoup(r.text, "lxml")
 
 def normalize_text(t):
-    return re.sub(r"\s+"," ",t).strip()
-
-# -----------------------------
-# 記事日付取得
-# -----------------------------
+    return re.sub(r"\s+", " ", t).strip()
 
 def extract_article_date_from_link(link):
-
-    m = re.search(r"[?&]b=n(\d{8})\d*",link)
-
+    m = re.search(r"[?&]b=n(\d{8})\d*", link)
     if m:
         ymd = m.group(1)
         return f"{ymd[0:4]}/{ymd[4:6]}/{ymd[6:8]}"
-
     return ""
 
-# -----------------------------
-# 銘柄名取得
-# -----------------------------
-
 def get_stock_name(code):
-
     url = f"https://kabutan.jp/stock/?code={code}"
     soup = get_soup(url)
 
-    title = soup.title.get_text(strip=True)
-
-    m = re.match(r"(.+?)【"+re.escape(code)+"】",title)
-
+    title = soup.title.get_text(strip=True) if soup.title else ""
+    m = re.match(r"(.+?)【" + re.escape(code) + r"】", title)
     if m:
         return m.group(1)
 
     return code
 
-# -----------------------------
-# ランキング銘柄取得
-# -----------------------------
-
-def extract_ranked_stocks(url,limit=20):
-
+def extract_ranked_stocks(url, limit=20):
     soup = get_soup(url)
-
-    stocks=[]
-    seen=set()
+    stocks = []
+    seen = set()
 
     for a in soup.select("a[href*='/stock/?code=']"):
-
-        href=a.get("href","")
-
-        m=re.search(r"code=([0-9A-Z]+)",href)
-
+        href = a.get("href", "")
+        m = re.search(r"code=([0-9A-Z]+)", href)
         if not m:
             continue
 
-        code=m.group(1)
+        code = m.group(1)
 
         if code in IGNORE_CODES:
             continue
-
-        if not re.fullmatch(r"[0-9A-Z]{4}",code):
+        if not re.fullmatch(r"[0-9A-Z]{4}", code):
             continue
-
         if code in seen:
             continue
 
-        stocks.append({"code":code})
-
+        stocks.append({"code": code})
         seen.add(code)
 
-        if len(stocks)>=limit:
+        if len(stocks) >= limit:
             break
 
     return stocks
 
-# -----------------------------
-# 材料取得
-# -----------------------------
+def pick_materials(code, max_items=3):
+    url = f"https://kabutan.jp/stock/news?code={code}"
+    soup = get_soup(url)
 
-def pick_materials(code,max_items=3):
-
-    url=f"https://kabutan.jp/stock/news?code={code}"
-
-    soup=get_soup(url)
-
-    materials=[]
-    seen=set()
+    materials = []
+    seen = set()
 
     for a in soup.select("a[href*='&b=n']"):
-
-        title=normalize_text(a.get_text())
+        title = normalize_text(a.get_text())
 
         if not title:
             continue
-
         if title in seen:
             continue
-
         if any(w in title for w in ng_words):
             continue
 
-        link=urljoin("https://kabutan.jp",a.get("href",""))
-
-        date=extract_article_date_from_link(link)
+        link = urljoin("https://kabutan.jp", a.get("href", ""))
+        date = extract_article_date_from_link(link)
 
         materials.append({
-            "title":title,
-            "url":link,
-            "date":date
+            "title": title,
+            "url": link,
+            "date": date
         })
 
         seen.add(title)
 
-        if len(materials)>=max_items:
+        if len(materials) >= max_items:
             break
 
     return materials
 
-# -----------------------------
-# 行作成
-# -----------------------------
+def build_rows(category, ranking_url, limit=10):
+    ranked = extract_ranked_stocks(ranking_url, limit)
+    rows = []
+    now = datetime.now().strftime("%Y-%m-%d %H:%M")
 
-def build_rows(category,ranking_url,limit=10):
-
-    ranked=extract_ranked_stocks(ranking_url,limit)
-
-    rows=[]
-
-    now=datetime.now().strftime("%Y-%m-%d %H:%M")
-
-    for i,stock in enumerate(ranked,start=1):
-
-        code=stock["code"]
-
-        name=get_stock_name(code)
-
-        materials=pick_materials(code,3)
+    for i, stock in enumerate(ranked, start=1):
+        code = stock["code"]
+        name = get_stock_name(code)
+        materials = pick_materials(code, 3)
 
         rows.append({
-            "category":category,
-            "rank":i,
-            "code":code,
-            "name":name,
-            "news_list_url":f"https://kabutan.jp/stock/news?code={code}",
-            "materials":materials,
-            "time":now
+            "category": category,
+            "rank": i,
+            "code": code,
+            "name": name,
+            "news_list_url": f"https://kabutan.jp/stock/news?code={code}",
+            "materials": materials,
+            "time": now
         })
 
     return rows
 
+rows = []
+rows += build_rows("PTS", PTS_URL, 10)
+rows += build_rows("S高", STOP_URL, 10)
 
-rows=[]
-
-rows+=build_rows("PTS",PTS_URL,10)
-rows+=build_rows("S高",STOP_URL,10)
-
-print(json.dumps(rows[:3],ensure_ascii=False,indent=2))
+with open("docs/material.json", "w", encoding="utf-8") as f:
+    json.dump(rows, f, ensure_ascii=False, indent=2)
