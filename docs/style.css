@@ -1,0 +1,23 @@
+body {
+  font-family: sans-serif;
+  padding: 30px;
+}
+
+table {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+td, th {
+  border: 1px solid #ddd;
+  padding: 8px;
+  vertical-align: top;
+}
+
+th {
+  background: #f2f2f2;
+}
+
+a {
+  color: #0b57d0;
+}
