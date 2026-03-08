@@ -3,7 +3,8 @@ name: Update and Deploy Pages
 on:
   workflow_dispatch:
   schedule:
-    - cron: "*/30 * * * *"
+    - cron: "*/30 9-14 * * 1-5"
+    - cron: "*/30 15-16 * * 1-5"
 
 permissions:
   contents: read
